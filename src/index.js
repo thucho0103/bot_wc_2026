@@ -1,21 +1,28 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { DateTime } = require('luxon');
 const { fetchWorldCupData } = require('./api/espn');
-const { createMatchEmbed, createScheduleEmbed } = require('./utils/embeds');
+const { fetchWorldCupOdds } = require('./api/odds');
+const { createMatchEmbed, createScheduleEmbed, createOddsEmbed, translateTeam } = require('./utils/embeds');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const tz = process.env.TIMEZONE || 'UTC';
 
 // --- Command Definitions ---
 const commands = [
     new SlashCommandBuilder()
         .setName('schedule')
-        .setDescription('View upcoming World Cup matches'),
+        .setDescription('Xem lịch thi đấu World Cup sắp tới'),
     new SlashCommandBuilder()
         .setName('results')
-        .setDescription('View recent World Cup match results'),
+        .setDescription('Xem kết quả các trận đấu World Cup gần đây'),
     new SlashCommandBuilder()
         .setName('live')
-        .setDescription('Get current live scores'),
+        .setDescription('Xem tỷ số trực tiếp các trận đang diễn ra'),
+    new SlashCommandBuilder()
+        .setName('odds')
+        .setDescription('Xem tỷ lệ kèo các trận đấu World Cup sắp tới'),
 ].map(command => command.toJSON());
 
 // --- Slash Command Registration ---
@@ -30,43 +37,126 @@ async function registerCommands() {
         );
         console.log('Successfully reloaded application (/) commands.');
     } catch (error) {
-        console.error(error);
+        console.error('Error registering commands:', error);
     }
 }
+
+// --- Odds API Caching ---
+let oddsCache = null;
+let oddsCacheTime = 0;
+const ODDS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 
 // --- Interaction Handling ---
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     const { commandName } = interaction;
-    const data = await fetchWorldCupData();
 
-    if (!data) {
-        return interaction.reply({ content: 'Failed to fetch data from ESPN. Please try again later.', ephemeral: true });
-    }
+    try {
+        if (commandName === 'schedule') {
+            await interaction.deferReply();
+            
+            const now = DateTime.now().setZone(tz);
+            const startDateStr = now.toFormat('yyyyMMdd');
+            const endDateStr = now.plus({ days: 7 }).toFormat('yyyyMMdd');
+            
+            const data = await fetchWorldCupData(`${startDateStr}-${endDateStr}`);
+            if (!data || !data.events) {
+                return interaction.editReply('Không thể tải lịch thi đấu từ ESPN. Vui lòng thử lại sau.');
+            }
 
-    if (commandName === 'schedule') {
-        const upcoming = data.events.filter(e => e.status.type.state === 'pre');
-        if (upcoming.length === 0) return interaction.reply('No upcoming matches found.');
-        
-        const embed = createScheduleEmbed(upcoming);
-        await interaction.reply({ embeds: [embed] });
-    }
+            const upcoming = data.events.filter(e => e.status.type.state === 'pre');
+            if (upcoming.length === 0) {
+                return interaction.editReply('Không tìm thấy trận đấu sắp tới nào trong 7 ngày tới.');
+            }
+            
+            const { embed, banner } = createScheduleEmbed(upcoming, tz);
+            await interaction.editReply({ embeds: [embed], files: [banner] });
+        }
 
-    if (commandName === 'results') {
-        const finished = data.events.filter(e => e.status.type.state === 'post').slice(0, 5);
-        if (finished.length === 0) return interaction.reply('No recent results found.');
-        
-        const embeds = finished.map(event => createMatchEmbed(event));
-        await interaction.reply({ embeds });
-    }
+        if (commandName === 'results') {
+            await interaction.deferReply();
+            
+            const now = DateTime.now().setZone(tz);
+            const startDateStr = now.minus({ days: 7 }).toFormat('yyyyMMdd');
+            const endDateStr = now.toFormat('yyyyMMdd');
+            
+            const data = await fetchWorldCupData(`${startDateStr}-${endDateStr}`);
+            if (!data || !data.events) {
+                return interaction.editReply('Không thể tải kết quả từ ESPN. Vui lòng thử lại sau.');
+            }
 
-    if (commandName === 'live') {
-        const live = data.events.filter(e => e.status.type.state === 'in');
-        if (live.length === 0) return interaction.reply('There are no matches currently live.');
-        
-        const embeds = live.map(event => createMatchEmbed(event));
-        await interaction.reply({ embeds });
+            const finished = data.events.filter(e => e.status.type.state === 'post');
+            if (finished.length === 0) {
+                return interaction.editReply('Không tìm thấy kết quả trận đấu nào trong 7 ngày qua.');
+            }
+            
+            // Sort by date descending (most recent first)
+            finished.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            const recentFinished = finished.slice(0, 5);
+            const embeds = recentFinished.map(event => createMatchEmbed(event, tz));
+            await interaction.editReply({ embeds });
+        }
+
+        if (commandName === 'live') {
+            await interaction.deferReply();
+            
+            const data = await fetchWorldCupData();
+            if (!data || !data.events) {
+                return interaction.editReply('Không thể tải tỷ số trực tiếp từ ESPN. Vui lòng thử lại sau.');
+            }
+
+            const live = data.events.filter(e => e.status.type.state === 'in');
+            if (live.length === 0) {
+                return interaction.editReply('Hiện tại không có trận đấu nào đang diễn ra trực tiếp.');
+            }
+            
+            const embeds = live.map(event => createMatchEmbed(event, tz));
+            await interaction.editReply({ embeds });
+        }
+
+        if (commandName === 'odds') {
+            await interaction.deferReply();
+            
+            const apiKey = process.env.THE_ODDS_API_KEY;
+            if (!apiKey || apiKey === 'your_odds_api_key_here') {
+                return interaction.editReply('❌ Khóa API The Odds chưa được cấu hình. Vui lòng thiết lập `THE_ODDS_API_KEY` hợp lệ trong tệp `.env`.');
+            }
+            
+            const nowTime = Date.now();
+            let oddsData = null;
+            
+            // 5-minute Cache Check
+            if (oddsCache && (nowTime - oddsCacheTime < ODDS_CACHE_DURATION)) {
+                console.log('Serving odds data from cache.');
+                oddsData = oddsCache;
+            } else {
+                try {
+                    oddsData = await fetchWorldCupOdds(apiKey, process.env.THE_ODDS_REGION || 'us');
+                    oddsCache = oddsData;
+                    oddsCacheTime = nowTime;
+                } catch (err) {
+                    return interaction.editReply(`❌ Không thể tải tỷ lệ kèo: ${err.message}`);
+                }
+            }
+            
+            if (!oddsData || oddsData.length === 0) {
+                return interaction.editReply('Không tìm thấy trận đấu sắp tới nào có sẵn tỷ lệ kèo.');
+            }
+            
+            // Show odds for the next 3 upcoming matches to prevent character/embed limit issues
+            const upcomingOdds = oddsData.slice(0, 3);
+            const embeds = upcomingOdds.map(event => createOddsEmbed(event, tz));
+            await interaction.editReply({ embeds });
+        }
+    } catch (error) {
+        console.error(`Error handling command /${commandName}:`, error);
+        if (interaction.deferred) {
+            await interaction.editReply('Đã xảy ra lỗi khi thực hiện lệnh này.');
+        } else {
+            await interaction.reply({ content: 'Đã xảy ra lỗi khi thực hiện lệnh này.', ephemeral: true });
+        }
     }
 });
 
@@ -84,7 +174,6 @@ async function trackLiveScores() {
         return;
     }
 
-    // Discord snowflake IDs consist only of digits
     if (!/^\d+$/.test(channelId)) {
         if (!hasWarnedInvalidChannel) {
             console.warn(`Warning: LIVE_CHANNEL_ID "${channelId}" is not a valid Discord channel ID (snowflake). Live tracking is disabled.`);
@@ -104,7 +193,7 @@ async function trackLiveScores() {
         }
 
         const data = await fetchWorldCupData();
-        if (!data) return;
+        if (!data || !data.events) return;
 
         const liveMatches = data.events.filter(e => e.status.type.state === 'in');
 
@@ -114,8 +203,18 @@ async function trackLiveScores() {
             
             // Only post if the score has changed
             if (lastUpdate.get(matchId) !== scoreKey) {
-                const embed = createMatchEmbed(match);
-                embed.setTitle(`🔴 LIVE UPDATE: ${embed.data.title}`);
+                const isGoal = lastUpdate.has(matchId);
+                const embed = createMatchEmbed(match, tz);
+                
+                const teamName1 = translateTeam(match.competitions[0].competitors[0].team.displayName);
+                const teamName2 = translateTeam(match.competitions[0].competitors[1].team.displayName);
+
+                if (isGoal) {
+                    embed.setTitle(`⚽ CẬP NHẬT BÀN THẮNG: ${teamName1} vs ${teamName2}`);
+                } else {
+                    embed.setTitle(`🔴 TRẬN ĐẤU BẮT ĐẦU: ${teamName1} vs ${teamName2}`);
+                }
+
                 await channel.send({ embeds: [embed] });
                 lastUpdate.set(matchId, scoreKey);
             }
@@ -125,19 +224,20 @@ async function trackLiveScores() {
         const finishedMatches = data.events.filter(e => e.status.type.state === 'post');
         for (const match of finishedMatches) {
             if (lastUpdate.has(match.id)) {
-                const embed = createMatchEmbed(match);
-                embed.setTitle(`🏁 MATCH FINISHED: ${embed.data.title}`);
+                const embed = createMatchEmbed(match, tz);
+                const teamName1 = translateTeam(match.competitions[0].competitors[0].team.displayName);
+                const teamName2 = translateTeam(match.competitions[0].competitors[1].team.displayName);
+                embed.setTitle(`🏁 TRẬN ĐẤU KẾT THÚC: ${teamName1} vs ${teamName2}`);
                 await channel.send({ embeds: [embed] });
                 lastUpdate.delete(match.id);
             }
         }
         
-        // Reset warning flag if everything succeeded
         hasWarnedInvalidChannel = false;
     } catch (error) {
         if (!hasWarnedInvalidChannel) {
             console.error('Error fetching/sending to live channel:', error.message || error);
-            hasWarnedInvalidChannel = true; // Prevent spamming console logs on every tick
+            hasWarnedInvalidChannel = true;
         }
     }
 }
@@ -148,6 +248,8 @@ client.once('ready', () => {
     
     // Start tracking loop
     setInterval(trackLiveScores, parseInt(process.env.UPDATE_INTERVAL) || 60000);
+    // Run once immediately on start
+    trackLiveScores();
 });
 
 client.login(process.env.DISCORD_TOKEN);
