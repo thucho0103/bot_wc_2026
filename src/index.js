@@ -1,3 +1,11 @@
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception thrown:', error);
+});
+
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { DateTime } = require('luxon');
@@ -6,6 +14,14 @@ const { fetchWorldCupOdds } = require('./api/odds');
 const { createMatchEmbed, createScheduleEmbed, createOddsEmbed, translateTeam } = require('./utils/embeds');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.on('error', error => {
+    console.error('Discord client error:', error);
+});
+
+client.on('shardError', (error, shardId) => {
+    console.error(`Discord shard ${shardId} error:`, error);
+});
 
 const tz = process.env.TIMEZONE || 'UTC';
 
@@ -61,16 +77,25 @@ client.on('interactionCreate', async interaction => {
             const endDateStr = now.plus({ days: 7 }).toFormat('yyyyMMdd');
             
             const data = await fetchWorldCupData(`${startDateStr}-${endDateStr}`);
-            if (!data || !data.events) {
+            if (!data || !Array.isArray(data.events)) {
                 return interaction.editReply('Không thể tải lịch thi đấu từ ESPN. Vui lòng thử lại sau.');
             }
 
-            const upcoming = data.events.filter(e => e.status.type.state === 'pre');
+            const upcoming = data.events.filter(e => 
+                e && 
+                e.status?.type?.state === 'pre' && 
+                e.competitions?.[0]?.competitors?.[0]?.team && 
+                e.competitions?.[0]?.competitors?.[1]?.team
+            );
             if (upcoming.length === 0) {
                 return interaction.editReply('Không tìm thấy trận đấu sắp tới nào trong 7 ngày tới.');
             }
             
-            const { embed, banner } = createScheduleEmbed(upcoming, tz);
+            const scheduleResult = createScheduleEmbed(upcoming, tz);
+            if (!scheduleResult || !scheduleResult.embed) {
+                return interaction.editReply('Không thể hiển thị lịch thi đấu do dữ liệu trận đấu bị thiếu thông tin.');
+            }
+            const { embed, banner } = scheduleResult;
             await interaction.editReply({ embeds: [embed], files: [banner] });
         }
 
@@ -82,11 +107,16 @@ client.on('interactionCreate', async interaction => {
             const endDateStr = now.toFormat('yyyyMMdd');
             
             const data = await fetchWorldCupData(`${startDateStr}-${endDateStr}`);
-            if (!data || !data.events) {
+            if (!data || !Array.isArray(data.events)) {
                 return interaction.editReply('Không thể tải kết quả từ ESPN. Vui lòng thử lại sau.');
             }
 
-            const finished = data.events.filter(e => e.status.type.state === 'post');
+            const finished = data.events.filter(e => 
+                e && 
+                e.status?.type?.state === 'post' && 
+                e.competitions?.[0]?.competitors?.[0]?.team && 
+                e.competitions?.[0]?.competitors?.[1]?.team
+            );
             if (finished.length === 0) {
                 return interaction.editReply('Không tìm thấy kết quả trận đấu nào trong 7 ngày qua.');
             }
@@ -95,7 +125,10 @@ client.on('interactionCreate', async interaction => {
             finished.sort((a, b) => new Date(b.date) - new Date(a.date));
             
             const recentFinished = finished.slice(0, 5);
-            const embeds = recentFinished.map(event => createMatchEmbed(event, tz));
+            const embeds = recentFinished.map(event => createMatchEmbed(event, tz)).filter(Boolean);
+            if (embeds.length === 0) {
+                return interaction.editReply('Không thể hiển thị kết quả do dữ liệu trận đấu bị lỗi.');
+            }
             await interaction.editReply({ embeds });
         }
 
@@ -103,16 +136,24 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply();
             
             const data = await fetchWorldCupData();
-            if (!data || !data.events) {
+            if (!data || !Array.isArray(data.events)) {
                 return interaction.editReply('Không thể tải tỷ số trực tiếp từ ESPN. Vui lòng thử lại sau.');
             }
 
-            const live = data.events.filter(e => e.status.type.state === 'in');
+            const live = data.events.filter(e => 
+                e && 
+                e.status?.type?.state === 'in' && 
+                e.competitions?.[0]?.competitors?.[0]?.team && 
+                e.competitions?.[0]?.competitors?.[1]?.team
+            );
             if (live.length === 0) {
                 return interaction.editReply('Hiện tại không có trận đấu nào đang diễn ra trực tiếp.');
             }
             
-            const embeds = live.map(event => createMatchEmbed(event, tz));
+            const embeds = live.map(event => createMatchEmbed(event, tz)).filter(Boolean);
+            if (embeds.length === 0) {
+                return interaction.editReply('Không thể hiển thị tỷ số trực tiếp do dữ liệu trận đấu bị lỗi.');
+            }
             await interaction.editReply({ embeds });
         }
 
@@ -141,21 +182,33 @@ client.on('interactionCreate', async interaction => {
                 }
             }
             
-            if (!oddsData || oddsData.length === 0) {
+            if (!Array.isArray(oddsData) || oddsData.length === 0) {
+                return interaction.editReply('Không tìm thấy trận đấu sắp tới nào có sẵn tỷ lệ kèo.');
+            }
+            
+            const validOdds = oddsData.filter(e => e && e.home_team && e.away_team && e.commence_time);
+            if (validOdds.length === 0) {
                 return interaction.editReply('Không tìm thấy trận đấu sắp tới nào có sẵn tỷ lệ kèo.');
             }
             
             // Show odds for the next 3 upcoming matches to prevent character/embed limit issues
-            const upcomingOdds = oddsData.slice(0, 3);
-            const embeds = upcomingOdds.map(event => createOddsEmbed(event, tz));
+            const upcomingOdds = validOdds.slice(0, 3);
+            const embeds = upcomingOdds.map(event => createOddsEmbed(event, tz)).filter(Boolean);
+            if (embeds.length === 0) {
+                return interaction.editReply('Không thể hiển thị tỷ lệ kèo do lỗi cấu trúc dữ liệu từ API.');
+            }
             await interaction.editReply({ embeds });
         }
     } catch (error) {
         console.error(`Error handling command /${commandName}:`, error);
-        if (interaction.deferred) {
-            await interaction.editReply('Đã xảy ra lỗi khi thực hiện lệnh này.');
-        } else {
-            await interaction.reply({ content: 'Đã xảy ra lỗi khi thực hiện lệnh này.', ephemeral: true });
+        try {
+            if (interaction.deferred) {
+                await interaction.editReply('Đã xảy ra lỗi khi thực hiện lệnh này.');
+            } else {
+                await interaction.reply({ content: 'Đã xảy ra lỗi khi thực hiện lệnh này.', ephemeral: true });
+            }
+        } catch (replyError) {
+            console.error('Failed to send error reply to Discord:', replyError);
         }
     }
 });
@@ -193,21 +246,30 @@ async function trackLiveScores() {
         }
 
         const data = await fetchWorldCupData();
-        if (!data || !data.events) return;
+        if (!data || !Array.isArray(data.events)) return;
 
-        const liveMatches = data.events.filter(e => e.status.type.state === 'in');
+        const liveMatches = data.events.filter(e => 
+            e && 
+            e.status?.type?.state === 'in' && 
+            e.competitions?.[0]?.competitors?.[0]?.team && 
+            e.competitions?.[0]?.competitors?.[1]?.team
+        );
 
         for (const match of liveMatches) {
             const matchId = match.id;
-            const scoreKey = `${match.competitions[0].competitors[0].score}-${match.competitions[0].competitors[1].score}`;
+            const comp = match.competitions[0];
+            const team1 = comp.competitors[0];
+            const team2 = comp.competitors[1];
+            const scoreKey = `${team1.score}-${team2.score}`;
             
             // Only post if the score has changed
             if (lastUpdate.get(matchId) !== scoreKey) {
                 const isGoal = lastUpdate.has(matchId);
                 const embed = createMatchEmbed(match, tz);
+                if (!embed) continue;
                 
-                const teamName1 = translateTeam(match.competitions[0].competitors[0].team.displayName);
-                const teamName2 = translateTeam(match.competitions[0].competitors[1].team.displayName);
+                const teamName1 = translateTeam(team1.team.displayName);
+                const teamName2 = translateTeam(team2.team.displayName);
 
                 if (isGoal) {
                     embed.setTitle(`⚽ CẬP NHẬT BÀN THẮNG: ${teamName1} vs ${teamName2}`);
@@ -221,12 +283,21 @@ async function trackLiveScores() {
         }
 
         // Clean up finished matches from the tracker
-        const finishedMatches = data.events.filter(e => e.status.type.state === 'post');
+        const finishedMatches = data.events.filter(e => 
+            e && 
+            e.status?.type?.state === 'post' && 
+            e.competitions?.[0]?.competitors?.[0]?.team && 
+            e.competitions?.[0]?.competitors?.[1]?.team
+        );
         for (const match of finishedMatches) {
             if (lastUpdate.has(match.id)) {
                 const embed = createMatchEmbed(match, tz);
-                const teamName1 = translateTeam(match.competitions[0].competitors[0].team.displayName);
-                const teamName2 = translateTeam(match.competitions[0].competitors[1].team.displayName);
+                if (!embed) continue;
+                const comp = match.competitions[0];
+                const team1 = comp.competitors[0];
+                const team2 = comp.competitors[1];
+                const teamName1 = translateTeam(team1.team.displayName);
+                const teamName2 = translateTeam(team2.team.displayName);
                 embed.setTitle(`🏁 TRẬN ĐẤU KẾT THÚC: ${teamName1} vs ${teamName2}`);
                 await channel.send({ embeds: [embed] });
                 lastUpdate.delete(match.id);
@@ -252,4 +323,6 @@ client.once('ready', () => {
     trackLiveScores();
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+    console.error('Failed to log in to Discord:', error);
+});

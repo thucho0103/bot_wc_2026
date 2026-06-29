@@ -288,31 +288,32 @@ function getFlagByName(name) {
  * Formats a single match's betting lines (H2H, spreads, totals) as text.
  */
 function getOddsText(event) {
-    if (!event.bookmakers || event.bookmakers.length === 0) {
+    if (!event || !event.bookmakers || !Array.isArray(event.bookmakers) || event.bookmakers.length === 0) {
         return '❌ Không có tỷ lệ kèo từ nhà cái.';
     }
     
-    const bookmaker = event.bookmakers.find(b => b.markets.length > 0) || event.bookmakers[0];
+    const bookmaker = event.bookmakers.find(b => b && Array.isArray(b.markets) && b.markets.length > 0) || event.bookmakers[0];
+    if (!bookmaker) return '❌ Không có tỷ lệ kèo từ nhà cái.';
     
-    const h2hMarket = bookmaker.markets.find(m => m.key === 'h2h');
-    const spreadsMarket = bookmaker.markets.find(m => m.key === 'spreads');
-    const totalsMarket = bookmaker.markets.find(m => m.key === 'totals');
+    const h2hMarket = bookmaker.markets?.find(m => m && m.key === 'h2h');
+    const spreadsMarket = bookmaker.markets?.find(m => m && m.key === 'spreads');
+    const totalsMarket = bookmaker.markets?.find(m => m && m.key === 'totals');
     
     let lines = [];
-    lines.push(`🎯 **Nhà cái:** \`${bookmaker.title}\``);
+    lines.push(`🎯 **Nhà cái:** \`${bookmaker.title || 'N/A'}\``);
     
     const name1 = translateTeam(event.home_team);
     const name2 = translateTeam(event.away_team);
 
     // 1. Head-to-Head (H2H)
-    if (h2hMarket) {
-        const homeOutcome = h2hMarket.outcomes.find(o => o.name === event.home_team);
-        const awayOutcome = h2hMarket.outcomes.find(o => o.name === event.away_team);
-        const drawOutcome = h2hMarket.outcomes.find(o => o.name === 'Draw');
+    if (h2hMarket && Array.isArray(h2hMarket.outcomes)) {
+        const homeOutcome = h2hMarket.outcomes.find(o => o && o.name === event.home_team);
+        const awayOutcome = h2hMarket.outcomes.find(o => o && o.name === event.away_team);
+        const drawOutcome = h2hMarket.outcomes.find(o => o && o.name === 'Draw');
         
-        const homeOdds = homeOutcome ? homeOutcome.price.toFixed(2) : 'N/A';
-        const awayOdds = awayOutcome ? awayOutcome.price.toFixed(2) : 'N/A';
-        const drawOdds = drawOutcome ? drawOutcome.price.toFixed(2) : 'N/A';
+        const homeOdds = homeOutcome && typeof homeOutcome.price === 'number' ? homeOutcome.price.toFixed(2) : 'N/A';
+        const awayOdds = awayOutcome && typeof awayOutcome.price === 'number' ? awayOutcome.price.toFixed(2) : 'N/A';
+        const drawOdds = drawOutcome && typeof drawOutcome.price === 'number' ? drawOutcome.price.toFixed(2) : 'N/A';
         
         lines.push(`💵 **Kèo Châu Âu (1X2):**\n  • **${name1}** thắng: **${homeOdds}**\n  • **${name2}** thắng: **${awayOdds}**\n  • Hòa: **${drawOdds}**`);
     } else {
@@ -320,24 +321,28 @@ function getOddsText(event) {
     }
     
     // 2. Point Spreads / Handicap
-    if (spreadsMarket) {
-        const homeOutcome = spreadsMarket.outcomes.find(o => o.name === event.home_team);
-        const awayOutcome = spreadsMarket.outcomes.find(o => o.name === event.away_team);
+    if (spreadsMarket && Array.isArray(spreadsMarket.outcomes)) {
+        const homeOutcome = spreadsMarket.outcomes.find(o => o && o.name === event.home_team);
+        const awayOutcome = spreadsMarket.outcomes.find(o => o && o.name === event.away_team);
         
-        const homeLine = homeOutcome ? `${homeOutcome.point > 0 ? '+' : ''}${homeOutcome.point} (${homeOutcome.price.toFixed(2)})` : 'N/A';
-        const awayLine = awayOutcome ? `${awayOutcome.point > 0 ? '+' : ''}${awayOutcome.point} (${awayOutcome.price.toFixed(2)})` : 'N/A';
+        const homeLine = homeOutcome && typeof homeOutcome.point === 'number' && typeof homeOutcome.price === 'number'
+            ? `${homeOutcome.point > 0 ? '+' : ''}${homeOutcome.point} (${homeOutcome.price.toFixed(2)})` 
+            : 'N/A';
+        const awayLine = awayOutcome && typeof awayOutcome.point === 'number' && typeof awayOutcome.price === 'number'
+            ? `${awayOutcome.point > 0 ? '+' : ''}${awayOutcome.point} (${awayOutcome.price.toFixed(2)})` 
+            : 'N/A';
         
         lines.push(`📐 **Kèo Chấp (Handicap):**\n  • **${name1}** chấp: **${homeLine}**\n  • **${name2}** chấp: **${awayLine}**`);
     }
     
     // 3. Over/Under Totals
-    if (totalsMarket) {
-        const overOutcome = totalsMarket.outcomes.find(o => o.name === 'Over');
-        const underOutcome = totalsMarket.outcomes.find(o => o.name === 'Under');
+    if (totalsMarket && Array.isArray(totalsMarket.outcomes)) {
+        const overOutcome = totalsMarket.outcomes.find(o => o && o.name === 'Over');
+        const underOutcome = totalsMarket.outcomes.find(o => o && o.name === 'Under');
         
-        const point = overOutcome ? overOutcome.point : (underOutcome ? underOutcome.point : '2.5');
-        const overOdds = overOutcome ? overOutcome.price.toFixed(2) : 'N/A';
-        const underOdds = underOutcome ? underOutcome.price.toFixed(2) : 'N/A';
+        const point = overOutcome && typeof overOutcome.point === 'number' ? overOutcome.point : (underOutcome && typeof underOutcome.point === 'number' ? underOutcome.point : '2.5');
+        const overOdds = overOutcome && typeof overOutcome.price === 'number' ? overOutcome.price.toFixed(2) : 'N/A';
+        const underOdds = underOutcome && typeof underOutcome.price === 'number' ? underOutcome.price.toFixed(2) : 'N/A';
         
         lines.push(`📊 **Kèo Tài Xỉu (O/U ${point}):**\n  • Tài (Over): **${overOdds}**\n  • Xỉu (Under): **${underOdds}**`);
     }
@@ -351,14 +356,18 @@ function getOddsText(event) {
  * @param {string} [tz] - User timezone (defaults to UTC).
  */
 function createMatchEmbed(event, tz = 'UTC') {
-    const competition = event.competitions[0];
-    const status = event.status.type.shortDetail;
-    const state = event.status.type.state;
+    if (!event || !event.status || !event.status.type) return null;
+    const competition = event.competitions?.[0];
+    if (!competition) return null;
+    
+    const status = event.status.type.shortDetail || '—';
+    const state = event.status.type.state || 'pre';
     const isLive = state === 'in';
     const isFinished = state === 'post';
     
-    const team1 = competition.competitors[0];
-    const team2 = competition.competitors[1];
+    const team1 = competition.competitors?.[0];
+    const team2 = competition.competitors?.[1];
+    if (!team1 || !team2 || !team1.team || !team2.team) return null;
 
     const flag1 = getFlag(team1.team.abbreviation);
     const flag2 = getFlag(team2.team.abbreviation);
@@ -379,12 +388,15 @@ function createMatchEmbed(event, tz = 'UTC') {
         .setTitle(`${statusPrefix} ${name1} vs ${name2}`)
         .setURL(event.links?.[0]?.href || null)
         .setColor(color)
-        .setThumbnail(team1.team.logo || team2.team.logo || null)
-        .setTimestamp(new Date(competition.date));
+        .setThumbnail(team1.team.logo || team2.team.logo || null);
+
+    if (competition.date) {
+        embed.setTimestamp(new Date(competition.date));
+    }
 
     let scoreText = 'vs';
     if (isLive || isFinished) {
-        scoreText = `**${team1.score}** - **${team2.score}**`;
+        scoreText = `**${team1.score ?? 0}** - **${team2.score ?? 0}**`;
     }
     
     embed.setDescription(
@@ -392,9 +404,9 @@ function createMatchEmbed(event, tz = 'UTC') {
     );
 
     const getScorersText = (teamId) => {
-        if (!competition.details) return '—';
+        if (!competition.details || !Array.isArray(competition.details)) return '—';
         const scorers = competition.details
-            .filter(d => d.scoringPlay && d.team?.id === teamId)
+            .filter(d => d && d.scoringPlay && d.team?.id === teamId)
             .map(d => {
                 const player = d.athletesInvolved?.[0]?.displayName || 'Cầu thủ';
                 const minute = d.clock?.displayValue || '';
@@ -418,7 +430,9 @@ function createMatchEmbed(event, tz = 'UTC') {
         }
     }
 
-    const dateFormatted = DateTime.fromISO(competition.date).setZone(tz).toFormat('dd/MM/yyyy HH:mm');
+    const dateFormatted = competition.date 
+        ? DateTime.fromISO(competition.date).setZone(tz).toFormat('dd/MM/yyyy HH:mm')
+        : 'Chưa xác định';
     const groupInfo = competition.altGameNote ? competition.altGameNote.replace('FIFA World Cup, ', '') : 'FIFA World Cup';
     
     const stageVi = translateStage(groupInfo);
@@ -438,6 +452,7 @@ function createMatchEmbed(event, tz = 'UTC') {
  * Formats a list of upcoming matches as a schedule.
  */
 function createScheduleEmbed(events, tz = 'UTC') {
+    if (!Array.isArray(events)) return null;
     const banner = new AttachmentBuilder('src/assets/wc_2026_banner.jpg');
     
     const embed = new EmbedBuilder()
@@ -449,10 +464,17 @@ function createScheduleEmbed(events, tz = 'UTC') {
         .setFooter({ text: `Giờ hiển thị theo múi giờ: ${tz}` });
 
     events.slice(0, 10).forEach(event => {
-        const comp = event.competitions[0];
-        const date = DateTime.fromISO(event.date).setZone(tz).toFormat('dd/MM/yyyy HH:mm');
-        const team1 = comp.competitors[0];
-        const team2 = comp.competitors[1];
+        if (!event) return;
+        const comp = event.competitions?.[0];
+        if (!comp) return;
+        
+        const date = event.date 
+            ? DateTime.fromISO(event.date).setZone(tz).toFormat('dd/MM/yyyy HH:mm')
+            : 'Chưa xác định';
+        
+        const team1 = comp.competitors?.[0];
+        const team2 = comp.competitors?.[1];
+        if (!team1 || !team2 || !team1.team || !team2.team) return;
         
         const flag1 = getFlag(team1.team.abbreviation);
         const flag2 = getFlag(team2.team.abbreviation);
@@ -476,9 +498,13 @@ function createScheduleEmbed(events, tz = 'UTC') {
  * Formats a match from The Odds API into a beautiful embed.
  */
 function createOddsEmbed(event, tz = 'UTC') {
+    if (!event || !event.home_team || !event.away_team) return null;
+    
     const flag1 = getFlagByName(event.home_team);
     const flag2 = getFlagByName(event.away_team);
-    const dateFormatted = DateTime.fromISO(event.commence_time).setZone(tz).toFormat('dd/MM/yyyy HH:mm');
+    const dateFormatted = event.commence_time 
+        ? DateTime.fromISO(event.commence_time).setZone(tz).toFormat('dd/MM/yyyy HH:mm')
+        : 'Chưa xác định';
     
     const name1 = translateTeam(event.home_team);
     const name2 = translateTeam(event.away_team);
@@ -486,8 +512,11 @@ function createOddsEmbed(event, tz = 'UTC') {
     const embed = new EmbedBuilder()
         .setTitle(`💰 Tỷ lệ kèo: ${name1} vs ${name2}`)
         .setColor(0xF59E0B) // Amber
-        .setDescription(`### ${flag1} **${name1}** vs **${name2}** ${flag2}`)
-        .setTimestamp(new Date(event.commence_time));
+        .setDescription(`### ${flag1} **${name1}** vs **${name2}** ${flag2}`);
+        
+    if (event.commence_time) {
+        embed.setTimestamp(new Date(event.commence_time));
+    }
         
     const oddsText = getOddsText(event);
     

@@ -19,10 +19,12 @@ A production-ready Discord bot to track FIFA World Cup matches, live scores, and
 
 ## Installation
 
+### Standard Setup (Linux / macOS / Windows)
+
 1. **Clone the repository:**
    ```bash
-   git clone <your-repo-url>
-   cd wc-bot
+   git clone https://github.com/thucho0103/bot_wc_2026.git
+   cd bot_wc_2026
    ```
 
 2. **Install dependencies:**
@@ -47,10 +49,45 @@ A production-ready Discord bot to track FIFA World Cup matches, live scores, and
    node src/index.js
    ```
 
+### Setup on Android (Termux)
+
+To run this bot on an Android device using Termux, follow these steps:
+
+1. **Install Termux:** 
+   Download and install Termux from [F-Droid](https://f-droid.org/en/packages/com.termux/) (do not use the Google Play version, as it is outdated and no longer updated).
+
+2. **Prepare the Termux environment:**
+   Open Termux and run the following commands to update packages and install Git and Node.js:
+   ```bash
+   pkg update && pkg upgrade -y
+   pkg install git nodejs -y
+   ```
+
+3. **Clone and setup the bot:**
+   ```bash
+   git clone https://github.com/thucho0103/bot_wc_2026.git
+   cd bot_wc_2026
+   npm install
+   ```
+
+4. **Configure environment variables:**
+   Copy the example environment file and edit it (you can use `nano` to edit):
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
+   *(Press `Ctrl + O` and `Enter` to save, then `Ctrl + X` to exit nano)*.
+
+5. **Run the bot:**
+   ```bash
+   node src/index.js
+   ```
+   *(To keep the bot running in the background on Termux, you can use `pm2` by running `npm install -g pm2` and then `pm2 start src/index.js --name "wc-bot"`)*.
+
 ## Project Structure
 
 ```text
-wc-bot/
+bot_wc_2026/
 ├── src/
 │   ├── api/
 │   │   └── espn.js       # ESPN API communication
