@@ -19,7 +19,21 @@ A production-ready Discord bot to track FIFA World Cup matches, live scores, and
 
 ## Installation
 
-### Standard Setup (Linux / macOS / Windows)
+### Quick Setup (Automated - macOS / Linux / Termux)
+
+You can run this single command to download, install dependencies, guide you through setting up environment variables, and run the bot immediately:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/thucho0103/bot_wc_2026/main/setup.sh | bash
+```
+
+*Note: If the repository is **Private**, use this command instead (replace `<YOUR_GITHUB_TOKEN>` with your Personal Access Token):*
+
+```bash
+curl -H "Authorization: token <YOUR_GITHUB_TOKEN>" -H "Accept: application/vnd.github.v3.raw" -sSL https://api.github.com/repos/thucho0103/bot_wc_2026/contents/setup.sh | bash
+```
+
+### Standard Setup (Manual)
 
 1. **Clone the repository:**
    ```bash

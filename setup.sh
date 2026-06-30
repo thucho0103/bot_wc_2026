@@ -18,15 +18,22 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-# 2. Clone dự án
-REPO_DIR="bot_wc_2026"
+# 2. Tải và giải nén dự án
+REPO_DIR="bot_wc_2026-main"
 if [ -d "$REPO_DIR" ]; then
-    echo "-> Thư mục $REPO_DIR đã tồn tại. Đang cập nhật code mới nhất..."
+    echo "-> Thư mục $REPO_DIR đã tồn tại."
     cd "$REPO_DIR"
-    git pull
 else
-    echo "-> Đang tải source code từ GitHub..."
-    git clone https://github.com/thucho0103/bot_wc_2026.git "$REPO_DIR"
+    echo "-> Đang tải source code dạng ZIP từ GitHub..."
+    curl -L https://github.com/thucho0103/bot_wc_2026/archive/refs/heads/main.zip -o bot_wc_2026.zip
+    
+    if ! command -v unzip &> /dev/null; then
+        echo "Lỗi: Không tìm thấy lệnh 'unzip'. Vui lòng cài đặt unzip và thử lại."
+        exit 1
+    fi
+    
+    unzip -q bot_wc_2026.zip
+    rm bot_wc_2026.zip
     cd "$REPO_DIR"
 fi
 
